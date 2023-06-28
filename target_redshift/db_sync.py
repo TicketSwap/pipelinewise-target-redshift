@@ -264,7 +264,6 @@ class DbSync:
             aws_session = boto3.session.Session()
 
         self.s3 = aws_session.client('s3')
-        self.logger.info(self.s3.list_buckets())
         self.skip_updates = self.connection_config.get('skip_updates', False)
 
         self.schema_name = None
