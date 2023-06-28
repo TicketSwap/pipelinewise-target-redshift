@@ -1,4 +1,4 @@
-import collections
+import collections.abc
 import itertools
 import json
 import os
@@ -51,7 +51,9 @@ def column_type(schema_property, with_length=True):
     varchar_length = DEFAULT_VARCHAR_LENGTH
     if schema_property.get('maxLength', 0) > varchar_length:
         varchar_length = LONG_VARCHAR_LENGTH
-    if 'object' in property_type or 'array' in property_type:
+    if 'object' in property_type:
+        column_type = 'super'
+    if 'array' in property_type:
         column_type = 'character varying'
         varchar_length = LONG_VARCHAR_LENGTH
 
@@ -161,7 +163,7 @@ def flatten_record(d, flatten_schema=None, parent_key=[], sep='__', level=0, max
     items = []
     for k, v in d.items():
         new_key = flatten_key(k, parent_key, sep)
-        if isinstance(v, collections.MutableMapping) and level < max_level:
+        if isinstance(v, collections.abc.MutableMapping) and level < max_level:
             items.extend(flatten_record(v, flatten_schema, parent_key + [k], sep=sep, level=level + 1, max_level=max_level).items())
         else:
             items.append((new_key, json.dumps(v) if _should_json_dump_value(k, v, flatten_schema) else v))
@@ -231,28 +233,34 @@ class DbSync:
             sys.exit(1)
 
         aws_profile = self.connection_config.get('aws_profile') or os.environ.get('AWS_PROFILE')
+        aws_assume_role_auth = self.connection_config.get('aws_assume_role_auth') or os.environ.get('AWS_ASSUME_ROLE_AUTH')
         aws_access_key_id = self.connection_config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
         aws_secret_access_key = self.connection_config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
         aws_session_token = self.connection_config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
 
         # Init S3 client
-        # Conditionally pass keys as this seems to affect whether instance credentials are correctly loaded if the keys are None
         if aws_access_key_id and aws_secret_access_key:
             aws_session = boto3.session.Session(
                 aws_access_key_id=aws_access_key_id,
                 aws_secret_access_key=aws_secret_access_key,
                 aws_session_token=aws_session_token
             )
-            credentials = aws_session.get_credentials().get_frozen_credentials()
-
-            # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
-            self.connection_config['aws_access_key_id'] = credentials.access_key
-            self.connection_config['aws_secret_access_key'] = credentials.secret_key
-            self.connection_config['aws_session_token'] = credentials.token
-        else:
+        elif aws_profile:
             aws_session = boto3.session.Session(profile_name=aws_profile)
+        else:
+            # Attempt to retrieve the temporary credentials from AWS IAM Service role
+            self.logger.info("No AWS credentials or profile found. Will attempt to assume service role and retrieve temporary credentials")
+            aws_session = boto3.session.Session()
+            
+        credentials = aws_session.get_credentials().get_frozen_credentials()
+
+        # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
+        self.connection_config['aws_access_key_id'] = credentials.access_key
+        self.connection_config['aws_secret_access_key'] = credentials.secret_key
+        self.connection_config['aws_session_token'] = credentials.token
 
         self.s3 = aws_session.client('s3')
+        self.logger.info(self.s3.list_buckets())
         self.skip_updates = self.connection_config.get('skip_updates', False)
 
         self.schema_name = None
