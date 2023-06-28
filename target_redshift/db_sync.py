@@ -233,7 +233,6 @@ class DbSync:
             sys.exit(1)
 
         aws_profile = self.connection_config.get('aws_profile') or os.environ.get('AWS_PROFILE')
-        aws_assume_role_auth = self.connection_config.get('aws_assume_role_auth') or os.environ.get('AWS_ASSUME_ROLE_AUTH')
         aws_access_key_id = self.connection_config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
         aws_secret_access_key = self.connection_config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
         aws_session_token = self.connection_config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
@@ -254,14 +253,10 @@ class DbSync:
             
         credentials = aws_session.get_credentials().get_frozen_credentials()
 
-            # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
-            self.connection_config['aws_access_key_id'] = credentials.access_key
-            self.connection_config['aws_secret_access_key'] = credentials.secret_key
-            self.connection_config['aws_session_token'] = credentials.token
-        elif aws_profile:
-            aws_session = boto3.session.Session(profile_name=aws_profile)
-        else:
-            aws_session = boto3.session.Session()
+        # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
+        self.connection_config['aws_access_key_id'] = credentials.access_key
+        self.connection_config['aws_secret_access_key'] = credentials.secret_key
+        self.connection_config['aws_session_token'] = credentials.token
 
         self.s3 = aws_session.client('s3')
         self.skip_updates = self.connection_config.get('skip_updates', False)
