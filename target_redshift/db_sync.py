@@ -251,7 +251,7 @@ class DbSync:
             self.logger.info("No AWS credentials or profile found. Will attempt to assume service role and retrieve temporary credentials")
             aws_session = boto3.session.Session()
             
-        credentials = aws_session.get_credentials().get_frozen_credentials()
+        credentials = aws_session.get_credentials()
 
         # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
         self.connection_config['aws_access_key_id'] = credentials.access_key
