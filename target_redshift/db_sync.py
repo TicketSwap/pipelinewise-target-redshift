@@ -231,35 +231,9 @@ class DbSync:
         if len(config_errors) != 0:
             self.logger.error("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
             sys.exit(1)
-
-        aws_profile = self.connection_config.get('aws_profile') or os.environ.get('AWS_PROFILE')
-        aws_access_key_id = self.connection_config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
-        aws_secret_access_key = self.connection_config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
-        aws_session_token = self.connection_config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
-
-        # Init S3 client
-        if aws_access_key_id and aws_secret_access_key:
-            aws_session = boto3.session.Session(
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-                aws_session_token=aws_session_token
-            )
-        elif aws_profile:
-            aws_session = boto3.session.Session(profile_name=aws_profile)
-        else:
-            # Attempt to retrieve the temporary credentials from AWS IAM Service role
-            self.logger.info("No AWS credentials or profile found. Will attempt to assume service role and retrieve temporary credentials")
-            aws_session = boto3.session.Session()
             
-        credentials = aws_session.get_credentials()
-
-        # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
-        self.connection_config['aws_access_key_id'] = credentials.access_key
-        self.connection_config['aws_secret_access_key'] = credentials.secret_key
-        self.connection_config['aws_session_token'] = credentials.token
-
-        self.s3 = aws_session.client('s3')
-        self.skip_updates = self.connection_config.get('skip_updates', False)
+        # Init S3 client
+        self.connect_to_s3()
 
         self.schema_name = None
         self.grantees = None
@@ -322,6 +296,36 @@ class DbSync:
 
             self.data_flattening_max_level = self.connection_config.get('data_flattening_max_level', 0)
             self.flatten_schema = flatten_schema(stream_schema_message['schema'], max_level=self.data_flattening_max_level)
+            
+    def connect_to_s3(self):
+        aws_profile = self.connection_config.get('aws_profile') or os.environ.get('AWS_PROFILE')
+        aws_access_key_id = self.connection_config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
+        aws_secret_access_key = self.connection_config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
+        aws_session_token = self.connection_config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
+
+        # Init S3 client
+        if aws_access_key_id and aws_secret_access_key:
+            aws_session = boto3.session.Session(
+                aws_access_key_id=aws_access_key_id,
+                aws_secret_access_key=aws_secret_access_key,
+                aws_session_token=aws_session_token
+            )
+        elif aws_profile:
+            aws_session = boto3.session.Session(profile_name=aws_profile)
+        else:
+            # Attempt to retrieve the temporary credentials from AWS IAM Service role
+            self.logger.info("No AWS credentials or profile found. Will attempt to assume service role and retrieve temporary credentials")
+            aws_session = boto3.session.Session()
+            
+        credentials = aws_session.get_credentials()
+
+        # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
+        self.connection_config['aws_access_key_id'] = credentials.access_key
+        self.connection_config['aws_secret_access_key'] = credentials.secret_key
+        self.connection_config['aws_session_token'] = credentials.token
+
+        self.s3 = aws_session.client('s3')
+        self.skip_updates = self.connection_config.get('skip_updates', False)
 
     def open_connection(self):
         conn_string = "host='{}' dbname='{}' user='{}' password='{}' port='{}'".format(
@@ -393,6 +397,7 @@ class DbSync:
         self.logger.info("Target S3 bucket: {}, local file: {}, S3 key: {}".format(bucket, file, s3_key))
 
         extra_args = {'ACL': s3_acl} if s3_acl else None
+        self.connect_to_s3()
         self.s3.upload_file(file, bucket, s3_key, ExtraArgs=extra_args)
 
         return s3_key
@@ -400,6 +405,7 @@ class DbSync:
     def delete_from_s3(self, s3_key):
         self.logger.info("Deleting {} from S3".format(s3_key))
         bucket = self.connection_config['s3_bucket']
+        self.connect_to_s3()
         self.s3.delete_object(Bucket=bucket, Key=s3_key)
 
     # pylint: disable=too-many-locals
