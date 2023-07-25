@@ -32,7 +32,8 @@ def validate_config(config):
         'user',
         'password',
         'dbname',
-        's3_bucket'
+        's3_bucket',
+        'aws_redshift_copy_role_arn'
     ]
 
     # Check if mandatory keys exist
@@ -237,36 +238,8 @@ class DbSync:
             self.logger.error("Invalid configuration:\n   * {}".format('\n   * '.join(config_errors)))
             sys.exit(1)
             
-        # Init S3 client
-        aws_profile = self.connection_config.get('aws_profile') or os.environ.get('AWS_PROFILE')
-        aws_access_key_id = self.connection_config.get('aws_access_key_id') or os.environ.get('AWS_ACCESS_KEY_ID')
-        aws_secret_access_key = self.connection_config.get('aws_secret_access_key') or os.environ.get('AWS_SECRET_ACCESS_KEY')
-        aws_session_token = self.connection_config.get('aws_session_token') or os.environ.get('AWS_SESSION_TOKEN')
-        aws_role_arn = self.connection_config.get('aws_role_arn') or os.environ.get('AWS_ROLE_ARN')
-
-        # Init S3 client
-        if aws_access_key_id and aws_secret_access_key:
-            aws_session = boto3.session.Session(
-                aws_access_key_id=aws_access_key_id,
-                aws_secret_access_key=aws_secret_access_key,
-                aws_session_token=aws_session_token
-            )
-        elif aws_profile:
-            aws_session = boto3.session.Session(profile_name=aws_profile)
-        else:
-            # Attempt to retrieve the temporary credentials from AWS IAM Service role
-            self.logger.info("No AWS credentials or profile found. Will attempt to assume service role and retrieve temporary credentials")
-            first_session = boto3.Session()
-            aws_session = aws_assume_role_lib.assume_role(first_session, aws_role_arn)
-            
-        credentials = first_session.get_credentials().get_frozen_credentials()
-
-        # Explicitly set credentials to those fetched from Boto so we can re-use them in COPY SQL if necessary
-        self.connection_config['aws_access_key_id'] = credentials.access_key
-        self.connection_config['aws_secret_access_key'] = credentials.secret_key
-        self.connection_config['aws_session_token'] = credentials.token
-
-        self.s3 = aws_session.client('s3')
+        # Init S3 client    
+        self.s3 = boto3.client('s3')
         self.skip_updates = self.connection_config.get('skip_updates', False)
 
         self.schema_name = None
@@ -440,15 +413,7 @@ class DbSync:
                 # Step 2: Generate copy credentials - prefer role if provided, otherwise use access and secret keys
                 copy_credentials = """
                     iam_role '{aws_role_arn}'
-                """.format(aws_role_arn=self.connection_config['aws_redshift_copy_role_arn']) if self.connection_config.get("aws_redshift_copy_role_arn") else """
-                    ACCESS_KEY_ID '{aws_access_key_id}'
-                    SECRET_ACCESS_KEY '{aws_secret_access_key}'
-                    {aws_session_token}
-                """.format(
-                    aws_access_key_id=self.connection_config['aws_access_key_id'],
-                    aws_secret_access_key=self.connection_config['aws_secret_access_key'],
-                    aws_session_token="SESSION_TOKEN '{}'".format(self.connection_config['aws_session_token']) if self.connection_config.get('aws_session_token') else '',
-                )
+                """.format(aws_role_arn=self.connection_config['aws_redshift_copy_role_arn'])
 
                 # Step 3: Generate copy options - Override defaults from config.json if defined
                 copy_options = self.connection_config.get('copy_options',"""

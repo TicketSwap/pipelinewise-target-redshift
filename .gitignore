@@ -4,6 +4,7 @@
 .venv
 
 # Python
+test.ipynb
 __pycache__/
 *.py[cod]
 *$py.class
