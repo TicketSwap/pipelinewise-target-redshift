@@ -10,6 +10,7 @@ from uuid import uuid4
 from datetime import datetime
 from time import time
 
+import pytz
 import boto3
 from boto3 import Session
 from botocore.credentials import RefreshableCredentials
@@ -98,7 +99,7 @@ class RefreshableBotoSession:
                 "access_key": session_credentials.get("access_key"),
                 "secret_key": session_credentials.get("secret_key"),
                 "token": session_credentials.get("token"),
-                "expiry_time": datetime.fromtimestamp(time() + self.session_ttl).isoformat(),
+                "expiry_time": datetime.fromtimestamp(time() + self.session_ttl).replace(tzinfo=pytz.utc).isoformat(),
             }
 
         return credentials
